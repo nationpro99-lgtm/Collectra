@@ -56,23 +56,29 @@ export interface FirestoreErrorInfo {
   };
 }
 
+const sanitizeDomain = (val?: string): string => {
+  if (!val) return '';
+  return val.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+};
+
 /**
  * Resolve effective Firebase configuration:
  * Supports Vercel environment variables (VITE_FIREBASE_*) with automatic fallback to firebase-applet-config.json
  */
 export const effectiveFirebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || baseConfig.apiKey || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || baseConfig.authDomain || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || baseConfig.projectId || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || baseConfig.storageBucket || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || baseConfig.messagingSenderId || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || baseConfig.appId || '',
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || baseConfig.measurementId || '',
-  firestoreDatabaseId:
+  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY || baseConfig.apiKey || '').trim(),
+  authDomain: sanitizeDomain(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || baseConfig.authDomain || ''),
+  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID || baseConfig.projectId || '').trim(),
+  storageBucket: sanitizeDomain(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || baseConfig.storageBucket || ''),
+  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || baseConfig.messagingSenderId || '').trim(),
+  appId: (import.meta.env.VITE_FIREBASE_APP_ID || baseConfig.appId || '').trim(),
+  measurementId: (import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || baseConfig.measurementId || '').trim(),
+  firestoreDatabaseId: (
     import.meta.env.VITE_FIREBASE_DATABASE_ID ||
     import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
     (baseConfig as any).firestoreDatabaseId ||
-    'ai-studio-collectiqsmartin-589e7824-7143-495a-af4b-802bda12a604',
+    'ai-studio-collectiqsmartin-589e7824-7143-495a-af4b-802bda12a604'
+  ).trim(),
 };
 
 let app: FirebaseApp;
