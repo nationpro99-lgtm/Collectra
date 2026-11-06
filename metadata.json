@@ -1,0 +1,6 @@
+{
+  "name": "CollectIQ - Smart Invoices & Debt Collection Platform",
+  "description": "CollectIQ is a complete, production-quality SaaS invoice management and AI-powered payment collection platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
