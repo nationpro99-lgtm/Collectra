@@ -27,7 +27,7 @@ import {
   onSnapshot,
   getDocFromServer,
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import baseConfig from '../../firebase-applet-config.json';
 
 // Error handling enum and interface conforming to Firebase skill
 export enum OperationType {
@@ -56,32 +56,84 @@ export interface FirestoreErrorInfo {
   };
 }
 
+/**
+ * Resolve effective Firebase configuration:
+ * Supports Vercel environment variables (VITE_FIREBASE_*) with automatic fallback to firebase-applet-config.json
+ */
+export const effectiveFirebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || baseConfig.apiKey || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || baseConfig.authDomain || '',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || baseConfig.projectId || '',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || baseConfig.storageBucket || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || baseConfig.messagingSenderId || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || baseConfig.appId || '',
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || baseConfig.measurementId || '',
+  firestoreDatabaseId:
+    import.meta.env.VITE_FIREBASE_DATABASE_ID ||
+    import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
+    (baseConfig as any).firestoreDatabaseId ||
+    'ai-studio-collectiqsmartin-589e7824-7143-495a-af4b-802bda12a604',
+};
+
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 let isConnected = false;
 
 try {
-  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+  // Prevent duplicate initialization in HMR / fast reload
+  app = getApps().length === 0 ? initializeApp(effectiveFirebaseConfig) : getApps()[0];
   auth = getAuth(app);
-  const databaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-collectiqsmartin-589e7824-7143-495a-af4b-802bda12a604';
-  db = getFirestore(app, databaseId);
+
+  const targetDbId = effectiveFirebaseConfig.firestoreDatabaseId?.trim();
+  if (!targetDbId || targetDbId === '(default)') {
+    db = getFirestore(app);
+  } else {
+    try {
+      db = getFirestore(app, targetDbId);
+    } catch {
+      console.warn('Failed to bind custom Firestore databaseId, initializing default Firestore database.');
+      db = getFirestore(app);
+    }
+  }
+
   isConnected = true;
 } catch (e) {
   console.error('Firebase initialization error:', e);
 }
 
-// Critical Constraint: Test connection to Firestore on boot
+// Critical Constraint: Test connection to Firestore on boot with auto-fallback
 async function testConnection() {
   if (!db) return;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
+    if (error instanceof Error) {
+      // If custom database is NOT_FOUND or offline, attempt fallback to default database instance
+      if (
+        (error.message.includes('NOT_FOUND') || error.message.includes('the client is offline')) &&
+        effectiveFirebaseConfig.firestoreDatabaseId &&
+        effectiveFirebaseConfig.firestoreDatabaseId !== '(default)'
+      ) {
+        console.warn('Custom databaseId returned NOT_FOUND. Attempting connection to default Firestore database...');
+        try {
+          const defaultDb = getFirestore(app);
+          await getDocFromServer(doc(defaultDb, 'test', 'connection'));
+          db = defaultDb;
+          console.log('Successfully connected to default Firestore database.');
+          return;
+        } catch {
+          // Both failed
+        }
+      }
+      if (error.message.includes('the client is offline')) {
+        console.error('Please check your Firebase configuration or internet connection.');
+      }
     }
   }
 }
+
+// Execute connection test
 testConnection();
 
 export { app, auth, db, isConnected };

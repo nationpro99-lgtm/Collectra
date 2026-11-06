@@ -56,6 +56,25 @@ service cloud.firestore {
              data.role in ['Admin', 'Manager', 'Collector', 'Viewer'];
     }
 
+    // Validation Blueprint: Conversation
+    function isValidConversation(data) {
+      return data.keys().hasAll(['id', 'userId', 'businessId', 'title']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.businessId is string && data.businessId.size() <= 128 &&
+             data.title is string && data.title.size() <= 200;
+    }
+
+    // Validation Blueprint: ChatMessage
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['id', 'conversationId', 'userId', 'role', 'text']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.conversationId is string && data.conversationId.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.role in ['ai', 'user'] &&
+             data.text is string && data.text.size() <= 5000;
+    }
+
     // Validation Blueprint: Business
     function isValidBusiness(data) {
       return data.keys().hasAll(['businessId', 'businessName', 'ownerEmail', 'ownerUid']) &&
@@ -145,6 +164,33 @@ service cloud.firestore {
       allow create: if isOwner(userId) && isValidUserProfile(incoming());
       allow update: if isOwner(userId) && isValidUserProfile(incoming()) &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'photoURL']);
+
+      // Private AI chat conversations for the user
+      match /conversations/{conversationId} {
+        allow list: if isOwner(userId);
+        allow get: if isValidId(conversationId) && isOwner(userId);
+        allow create: if isValidId(conversationId) && isOwner(userId) &&
+                         incoming().userId == request.auth.uid &&
+                         isValidConversation(incoming());
+        allow update: if isValidId(conversationId) && isOwner(userId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().userId == existing().userId &&
+                         isValidConversation(incoming());
+        allow delete: if isValidId(conversationId) && isOwner(userId);
+
+        match /messages/{messageId} {
+          allow list: if isOwner(userId);
+          allow get: if isValidId(messageId) && isOwner(userId);
+          allow create: if isValidId(messageId) && isOwner(userId) &&
+                           incoming().userId == request.auth.uid &&
+                           incoming().conversationId == conversationId &&
+                           isValidChatMessage(incoming());
+          allow update: if isValidId(messageId) && isOwner(userId) &&
+                           incoming().userId == request.auth.uid &&
+                           isValidChatMessage(incoming());
+          allow delete: if isValidId(messageId) && isOwner(userId);
+        }
+      }
     }
 
     // Multi-tenant Business matching

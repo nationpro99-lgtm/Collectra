@@ -12,10 +12,14 @@ import {
   RotateCcw,
   KeyRound,
   Lock,
+  Trash2,
+  MessageSquare,
+  Loader2,
 } from 'lucide-react';
 import { AppState, storageService } from '../../services/storage';
 import { NotificationSettingsView } from '../notifications/NotificationSettingsView';
 import { useAuth } from '../../context/AuthContext';
+import { chatService } from '../../services/chatService';
 
 interface SettingsPageProps {
   state: AppState;
@@ -55,6 +59,27 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
 
   // Security
   const [twoFactor, setTwoFactor] = useState(state.settings.twoFactorEnabled);
+
+  // Chat History Management state
+  const [showClearChatModal, setShowClearChatModal] = useState(false);
+  const [isClearingChat, setIsClearingChat] = useState(false);
+  const [chatNotice, setChatNotice] = useState<string | null>(null);
+
+  const handleClearAllChatHistory = async () => {
+    if (!currentUser?.uid) return;
+    setIsClearingChat(true);
+    try {
+      const res = await chatService.deleteAllConversations(currentUser.uid);
+      setChatNotice(`All chat history cleared (${res.deletedCount} conversations deleted).`);
+      setTimeout(() => setChatNotice(null), 4000);
+    } catch (err: any) {
+      setChatNotice(`Failed to clear chat: ${err.message || 'Permission denied'}`);
+      setTimeout(() => setChatNotice(null), 4000);
+    } finally {
+      setIsClearingChat(false);
+      setShowClearChatModal(false);
+    }
+  };
 
   const handleSaveGeneral = (e: React.FormEvent) => {
     e.preventDefault();
@@ -464,6 +489,32 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
                 Active Now
               </span>
             </div>
+
+            {/* AI Advisor Chat Privacy & Clear History */}
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <MessageSquare size={14} className="text-indigo-600" />
+                  AI Advisor Chat History & Privacy
+                </span>
+                <span className="text-[11px] text-slate-500 block mt-0.5">
+                  Delete all your saved AI Advisor conversations and questions permanently from Firestore
+                </span>
+                {chatNotice && (
+                  <span className="text-[11px] font-semibold text-emerald-600 mt-1 block">
+                    {chatNotice}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClearChatModal(true)}
+                className="px-3.5 py-2 rounded-xl border border-rose-200 bg-white hover:bg-rose-50 text-rose-600 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer self-start sm:self-auto shrink-0"
+              >
+                <Trash2 size={13} />
+                <span>Clear All Chat History</span>
+              </button>
+            </div>
           </div>
 
           <div className="pt-6 border-t border-slate-200">
@@ -480,6 +531,55 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
             >
               Reset to Reference Seed Data
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Clear All Chat History */}
+      {showClearChatModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 p-6 animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4">
+              <Trash2 size={24} />
+            </div>
+
+            <h4 className="text-base font-extrabold text-slate-900">Clear All Chat History</h4>
+            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+              Are you sure you want to delete all your chat history? All your conversations and messages will be permanently deleted from Firebase Firestore. This action cannot be undone.
+            </p>
+
+            <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              <strong>Account Scope:</strong> Only conversations belonging to <strong>{currentUser?.email || 'your account'}</strong> will be deleted. Other team members and business records are completely unaffected.
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={isClearingChat}
+                onClick={() => setShowClearChatModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 border border-slate-300 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isClearingChat}
+                onClick={handleClearAllChatHistory}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {isClearingChat ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Clearing All...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} />
+                    <span>Clear All History</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -178,6 +178,37 @@
       },
       "required": ["id", "businessId", "type", "title"]
     },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "AI advisor chat conversation thread associated with user and business",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "businessId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "lastMessage": { "type": "string", "maxLength": 1000 },
+        "messageCount": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "userId", "businessId", "title"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Message document inside an AI chat conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "conversationId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "businessId": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["ai", "user"] },
+        "text": { "type": "string", "maxLength": 5000 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "conversationId", "userId", "role", "text"]
+    },
     "TestConnection": {
       "title": "TestConnection",
       "description": "Heartbeat diagnostic document for connection verification",
@@ -197,6 +228,14 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "User profile document containing tenant business assignment"
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "User private AI chat conversations"
+    },
+    "/users/{userId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Individual messages in an AI chat conversation"
     },
     "/businesses/{businessId}": {
       "schema": "Business",

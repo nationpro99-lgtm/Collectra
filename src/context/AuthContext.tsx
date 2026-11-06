@@ -190,10 +190,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } catch (fbErr: any) {
       let msg = fbErr.message || 'Failed to sign in.';
-      if (fbErr.code === 'auth/invalid-credential' || fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password') {
+      if (fbErr.code === 'auth/unauthorized-domain') {
+        const domain = typeof window !== 'undefined' ? window.location.hostname : 'your deployed domain';
+        msg = `Domain not authorized: "${domain}" must be added in Firebase Console > Authentication > Settings > Authorized domains.`;
+      } else if (fbErr.code === 'auth/invalid-credential' || fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password') {
         msg = 'Invalid email or password. Please verify your credentials or create an account.';
       } else if (fbErr.code === 'auth/too-many-requests') {
         msg = 'Too many failed login attempts. Please reset your password or try again later.';
+      } else if (fbErr.code === 'auth/network-request-failed') {
+        msg = 'Network connection to Firebase Authentication failed. Please check your internet connection or Firebase API key.';
       }
       setError(msg);
       setIsLoading(false);
@@ -271,7 +276,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(false);
       return { success: true };
     } catch (e: any) {
-      const msg = e.message || 'Google authentication failed.';
+      let msg = e.message || 'Google authentication failed.';
+      if (e.code === 'auth/unauthorized-domain') {
+        const domain = typeof window !== 'undefined' ? window.location.hostname : 'your deployed domain';
+        msg = `Domain not authorized: "${domain}" must be added to Authorized Domains in Firebase Console > Authentication > Settings.`;
+      } else if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+        msg = 'Google sign-in popup was cancelled before completing.';
+      } else if (e.code === 'auth/popup-blocked') {
+        msg = 'Sign-in popup was blocked by your browser. Please allow popups for this site.';
+      }
       setError(msg);
       setIsLoading(false);
       return { success: false, error: msg };
@@ -356,7 +369,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } catch (e: any) {
       let msg = e.message || 'Failed to create business account.';
-      if (e.code === 'auth/email-already-in-use') {
+      if (e.code === 'auth/unauthorized-domain') {
+        const domain = typeof window !== 'undefined' ? window.location.hostname : 'your deployed domain';
+        msg = `Domain not authorized: "${domain}" must be added to Authorized Domains in Firebase Console > Authentication > Settings.`;
+      } else if (e.code === 'auth/email-already-in-use') {
         msg = 'An account with this email address already exists. Please sign in instead.';
       } else if (e.code === 'auth/weak-password') {
         msg = 'Password is too weak. Please use at least 6 characters.';

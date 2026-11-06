@@ -316,3 +316,24 @@ export interface NotificationSettings {
   sandboxSimulationMode: boolean; // Safe preview mode
 }
 
+export interface ChatConversation {
+  id: string;
+  userId: string;
+  businessId: string;
+  title: string;
+  lastMessage?: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  userId: string;
+  businessId: string;
+  role: 'ai' | 'user';
+  text: string;
+  time?: string;
+  createdAt: string;
+}
