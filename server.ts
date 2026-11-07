@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
@@ -467,6 +468,7 @@ app.post('/api/whatsapp/send', async (req, res) => {
       if (parameters.invoiceNumber) paramList.push(String(parameters.invoiceNumber));
       if (parameters.amount) paramList.push(String(parameters.amount));
       if (parameters.dueDate) paramList.push(String(parameters.dueDate));
+      if (parameters.paymentUrl) paramList.push(String(parameters.paymentUrl));
       if (parameters.promisedDate && !parameters.dueDate) paramList.push(String(parameters.promisedDate));
 
       if (paramList.length > 0) {
@@ -900,6 +902,437 @@ app.post('/api/notifications/dispatch', async (req, res) => {
     deliveryStatus: 'sent',
     providerMessageId: `msg_${Date.now()}`,
     recipientTarget,
+  });
+});
+
+// ==========================================
+// RAZORPAY SMART PAYMENT LINK & WEBHOOK APIS
+// ==========================================
+
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
+
+// Server in-memory registry of Smart Payment Links
+interface ServerPaymentLink {
+  id: string;
+  token: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  businessId: string;
+  businessName: string;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  amount: number;
+  balance: number;
+  dueDate: string;
+  status: 'active' | 'paid' | 'expired' | 'revoked';
+  allowPartialPayments: boolean;
+  minPartialAmount?: number;
+  createdAt: string;
+  expiresAt: string;
+  paidAt?: string;
+  items?: any[];
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+}
+
+const paymentLinksStore = new Map<string, ServerPaymentLink>();
+const processedPayments = new Set<string>();
+const processedWebhookEvents = new Set<string>();
+
+// Get Payment Gateway Configuration info
+app.get('/api/payments/config', (_req, res) => {
+  res.json({
+    gateway: 'Razorpay',
+    configured: Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET),
+    keyId: RAZORPAY_KEY_ID || '',
+    webhookConfigured: Boolean(RAZORPAY_WEBHOOK_SECRET),
+    supportedMethods: ['UPI (GPay, PhonePe, Paytm, BHIM)', 'Cards (Visa, Mastercard, RuPay)', 'Net Banking', 'Wallets'],
+  });
+});
+
+// 1. Create Smart Payment Link
+app.post('/api/payments/create-link', (req, res) => {
+  const {
+    invoiceId,
+    invoiceNumber,
+    businessId = 'biz-default',
+    businessName = 'CollectIQ Enterprise',
+    customerId = '',
+    customerName = 'Customer',
+    customerEmail = '',
+    customerPhone = '',
+    amount = 0,
+    balance = 0,
+    dueDate = '',
+    allowPartialPayments = true,
+    minPartialAmount = 500,
+    items = [],
+    expiresInDays = 30,
+  } = req.body;
+
+  if (!invoiceId || !invoiceNumber) {
+    return res.status(400).json({ success: false, error: 'invoiceId and invoiceNumber are required.' });
+  }
+
+  // Generate secure non-guessable random token
+  const token = `plink_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  const id = `lnk_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+
+  const numAmount = Number(amount) || 0;
+  const numBalance = balance !== undefined ? Number(balance) : numAmount;
+
+  const paymentLink: ServerPaymentLink = {
+    id,
+    token,
+    invoiceId,
+    invoiceNumber,
+    businessId,
+    businessName,
+    customerId,
+    customerName,
+    customerEmail,
+    customerPhone,
+    amount: numAmount,
+    balance: Math.max(0, numBalance),
+    dueDate,
+    status: numBalance <= 0 ? 'paid' : 'active',
+    allowPartialPayments: Boolean(allowPartialPayments),
+    minPartialAmount: Number(minPartialAmount) || 500,
+    items,
+    createdAt: now.toISOString(),
+    expiresAt,
+  };
+
+  paymentLinksStore.set(token, paymentLink);
+
+  const reqHost = req.get('x-forwarded-host') || req.get('host') || 'localhost:3000';
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const paymentUrl = `${proto}://${reqHost}/pay/${token}`;
+
+  console.log(`[Smart Payment Link] Generated link for ${invoiceNumber}: ${paymentUrl}`);
+
+  return res.json({
+    success: true,
+    link: paymentLink,
+    paymentUrl,
+  });
+});
+
+// 2. Fetch Customer Payment Details by Link Token (Public Checkout)
+app.get('/api/payments/link/:token', (req, res) => {
+  const { token } = req.params;
+  const link = paymentLinksStore.get(token);
+
+  if (!link) {
+    return res.status(404).json({
+      success: false,
+      error: 'Payment link not found or has expired. Please contact the business for an updated payment link.',
+    });
+  }
+
+  // Check expiration
+  if (link.status === 'active' && new Date(link.expiresAt).getTime() < Date.now()) {
+    link.status = 'expired';
+  }
+
+  return res.json({
+    success: true,
+    link: {
+      id: link.id,
+      token: link.token,
+      invoiceNumber: link.invoiceNumber,
+      invoiceId: link.invoiceId,
+      businessName: link.businessName,
+      customerName: link.customerName,
+      customerEmail: link.customerEmail,
+      customerPhone: link.customerPhone,
+      amount: link.amount,
+      balance: link.balance,
+      paidAmount: Math.max(0, link.amount - link.balance),
+      dueDate: link.dueDate,
+      status: link.status,
+      allowPartialPayments: link.allowPartialPayments,
+      minPartialAmount: link.minPartialAmount,
+      items: link.items || [],
+      expiresAt: link.expiresAt,
+      currency: 'INR',
+      currencySymbol: '₹',
+      razorpayKeyId: RAZORPAY_KEY_ID || 'rzp_test_collectiq_demo',
+      isLiveGateway: Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET),
+    },
+  });
+});
+
+// 3. Create Razorpay Payment Order
+app.post('/api/payments/create-order', async (req, res) => {
+  const { token, amount } = req.body;
+  const link = paymentLinksStore.get(token);
+
+  if (!link) {
+    return res.status(404).json({ success: false, error: 'Payment link not found.' });
+  }
+
+  if (link.status !== 'active') {
+    return res.status(400).json({ success: false, error: `This payment link is ${link.status}.` });
+  }
+
+  const payAmount = Number(amount);
+  if (!payAmount || payAmount <= 0) {
+    return res.status(400).json({ success: false, error: 'Invalid payment amount.' });
+  }
+
+  if (payAmount > link.balance) {
+    return res.status(400).json({
+      success: false,
+      error: `Payment amount (₹${payAmount}) exceeds outstanding balance (₹${link.balance}).`,
+    });
+  }
+
+  if (!link.allowPartialPayments && payAmount < link.balance) {
+    return res.status(400).json({
+      success: false,
+      error: 'Partial payments are not enabled for this invoice. Please pay the full outstanding balance.',
+    });
+  }
+
+  const amountInPaise = Math.round(payAmount * 100);
+
+  // If live or test Razorpay credentials are configured, create official order via Razorpay API
+  if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) {
+    try {
+      const authHeader = 'Basic ' + Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+      const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          amount: amountInPaise,
+          currency: 'INR',
+          receipt: `${link.invoiceNumber}_${Date.now().toString().slice(-4)}`,
+          notes: {
+            invoiceId: link.invoiceId,
+            invoiceNumber: link.invoiceNumber,
+            businessId: link.businessId,
+            token: link.token,
+          },
+        }),
+      });
+
+      const orderData: any = await rzpResponse.json();
+
+      if (!rzpResponse.ok || orderData.error) {
+        console.error('Razorpay API error creating order:', orderData);
+        return res.status(400).json({
+          success: false,
+          error: orderData.error?.description || 'Failed to create Razorpay payment order.',
+        });
+      }
+
+      link.razorpayOrderId = orderData.id;
+
+      return res.json({
+        success: true,
+        orderId: orderData.id,
+        amount: payAmount,
+        amountInPaise,
+        currency: 'INR',
+        keyId: RAZORPAY_KEY_ID,
+        isSandbox: false,
+      });
+    } catch (err: any) {
+      console.error('Network error connecting to Razorpay API:', err);
+      return res.status(500).json({ success: false, error: `Razorpay connection error: ${err.message}` });
+    }
+  }
+
+  // Simulated Test/Sandbox Mode
+  const simulatedOrderId = `order_sim_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  link.razorpayOrderId = simulatedOrderId;
+
+  return res.json({
+    success: true,
+    orderId: simulatedOrderId,
+    amount: payAmount,
+    amountInPaise,
+    currency: 'INR',
+    keyId: 'rzp_test_collectiq_demo',
+    isSandbox: true,
+  });
+});
+
+// 4. Verify Razorpay Payment Signature and Settle Invoice
+app.post('/api/payments/verify', (req, res) => {
+  const { token, razorpayOrderId, razorpayPaymentId, razorpaySignature, amountPaid, paymentMethod = 'UPI' } = req.body;
+
+  const link = paymentLinksStore.get(token);
+  if (!link) {
+    return res.status(404).json({ success: false, error: 'Payment link not found.' });
+  }
+
+  const numPaid = Number(amountPaid);
+  if (!numPaid || numPaid <= 0) {
+    return res.status(400).json({ success: false, error: 'Invalid payment amount specified.' });
+  }
+
+  // Idempotency: Prevent duplicate payment processing
+  if (processedPayments.has(razorpayPaymentId)) {
+    return res.json({
+      success: true,
+      duplicate: true,
+      message: 'Payment has already been verified and recorded.',
+      paymentId: razorpayPaymentId,
+      receiptNumber: `RCP-${razorpayPaymentId.slice(-6)}`,
+      amountPaid: numPaid,
+      balanceRemaining: link.balance,
+      status: link.status,
+    });
+  }
+
+  // Real Signature Verification if secret is configured
+  if (RAZORPAY_KEY_SECRET && !razorpayOrderId?.startsWith('order_sim_')) {
+    const text = `${razorpayOrderId}|${razorpayPaymentId}`;
+    const expectedSignature = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(text).digest('hex');
+
+    if (expectedSignature !== razorpaySignature) {
+      console.error('Razorpay signature mismatch:', { expectedSignature, razorpaySignature });
+      return res.status(400).json({
+        success: false,
+        error: 'Cryptographic signature mismatch. Payment verification failed.',
+      });
+    }
+  }
+
+  // Update link balance
+  const previousBalance = link.balance;
+  const newBalance = Math.max(0, previousBalance - numPaid);
+  link.balance = newBalance;
+  link.status = newBalance <= 0 ? 'paid' : 'active';
+  link.paidAt = new Date().toISOString();
+  link.razorpayPaymentId = razorpayPaymentId;
+
+  // Mark payment ID as processed
+  processedPayments.add(razorpayPaymentId);
+
+  const receiptNumber = `RCP-${Date.now().toString().slice(-6)}`;
+
+  console.log(`[Payment Verified] Invoice #${link.invoiceNumber}: Settled ₹${numPaid}. Remaining: ₹${newBalance}`);
+
+  return res.json({
+    success: true,
+    verified: true,
+    paymentId: razorpayPaymentId,
+    receiptNumber,
+    invoiceNumber: link.invoiceNumber,
+    invoiceId: link.invoiceId,
+    businessId: link.businessId,
+    businessName: link.businessName,
+    customerName: link.customerName,
+    amountPaid: numPaid,
+    previousBalance,
+    balanceRemaining: newBalance,
+    status: link.status,
+    paymentMethod,
+    paidAt: link.paidAt,
+  });
+});
+
+// 5. Official Razorpay Webhook Handler
+app.post('/api/payments/webhook', (req, res) => {
+  const signature = req.headers['x-razorpay-signature'] as string;
+  const event = req.body;
+
+  // Idempotency check on webhook event ID
+  const eventId = event?.event_id || event?.id || `evt_${Date.now()}`;
+  if (processedWebhookEvents.has(eventId)) {
+    return res.status(200).json({ status: 'ignored', reason: 'duplicate event' });
+  }
+
+  if (RAZORPAY_WEBHOOK_SECRET && signature) {
+    try {
+      const rawBody = JSON.stringify(req.body);
+      const expected = crypto.createHmac('sha256', RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest('hex');
+      if (expected !== signature) {
+        console.warn('Razorpay webhook signature mismatch.');
+        return res.status(400).json({ error: 'Invalid webhook signature' });
+      }
+    } catch (e: any) {
+      console.warn('Webhook signature check notice:', e.message);
+    }
+  }
+
+  processedWebhookEvents.add(eventId);
+
+  const eventType = event?.event;
+  console.log(`[Razorpay Webhook] Received event: ${eventType} (ID: ${eventId})`);
+
+  if (eventType === 'payment.captured' || eventType === 'order.paid') {
+    const paymentEntity = event.payload?.payment?.entity;
+    const notes = paymentEntity?.notes || {};
+    const token = notes.token;
+
+    if (token && paymentLinksStore.has(token)) {
+      const link = paymentLinksStore.get(token)!;
+      const amountPaid = (paymentEntity.amount || 0) / 100;
+      const newBalance = Math.max(0, link.balance - amountPaid);
+      link.balance = newBalance;
+      link.status = newBalance <= 0 ? 'paid' : 'active';
+      link.paidAt = new Date().toISOString();
+      link.razorpayPaymentId = paymentEntity.id;
+      if (paymentEntity.id) processedPayments.add(paymentEntity.id);
+      console.log(`[Razorpay Webhook Settle] Updated link for ${link.invoiceNumber}. Status: ${link.status}`);
+    }
+  }
+
+  return res.status(200).json({ status: 'ok', received: true });
+});
+
+// 6. Expire or Revoke Payment Link
+app.post('/api/payments/revoke-link', (req, res) => {
+  const { token } = req.body;
+  const link = paymentLinksStore.get(token);
+  if (!link) {
+    return res.status(404).json({ success: false, error: 'Payment link not found.' });
+  }
+
+  link.status = 'revoked';
+  return res.json({ success: true, message: `Payment link for invoice ${link.invoiceNumber} has been revoked.` });
+});
+
+// 7. Backend Account Deletion & Resource Cleanup
+app.post('/api/account/delete-cleanup', (req, res) => {
+  const { uid, businessId, isOwner } = req.body;
+
+  if (!uid) {
+    return res.status(400).json({ success: false, error: 'User ID is required for cleanup.' });
+  }
+
+  console.log(`[Account Cleanup] Purging backend resources for user ${uid} (Business: ${businessId}, Owner: ${Boolean(isOwner)})`);
+
+  // Revoke in-memory payment links for this business
+  if (isOwner && businessId) {
+    let revokedCount = 0;
+    for (const [token, link] of paymentLinksStore.entries()) {
+      if (link.businessId === businessId) {
+        link.status = 'revoked';
+        paymentLinksStore.delete(token);
+        revokedCount++;
+      }
+    }
+    console.log(`[Account Cleanup] Revoked and purged ${revokedCount} active payment links.`);
+  }
+
+  return res.json({
+    success: true,
+    message: 'Backend session resources, background jobs, and payment links purged successfully.',
+    purged: { uid, businessId, isOwner: Boolean(isOwner) },
   });
 });
 

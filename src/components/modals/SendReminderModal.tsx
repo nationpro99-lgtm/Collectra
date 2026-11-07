@@ -14,12 +14,15 @@ import {
   RefreshCw,
   ExternalLink,
   ShieldAlert,
+  Link as LinkIcon,
+  Loader2,
 } from 'lucide-react';
 import { geminiAIService } from '../../services/gemini';
 import { storageService } from '../../services/storage';
 import { whatsappService, APPROVED_WHATSAPP_TEMPLATES, WhatsAppTemplateKey } from '../../services/whatsapp';
 import { normalizeWhatsAppNumber } from '../../utils/phone';
 import { gmailService } from '../../services/gmail';
+import { paymentLinkService } from '../../services/paymentLinkService';
 
 interface SendReminderModalProps {
   isOpen: boolean;
@@ -70,10 +73,42 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
     overdueDays > 30 ? 'firm' : 'standard'
   );
 
+  // Associated invoice and payment link
+  const matchingInvoice = useMemo(() => {
+    const list = storageService.getState().invoices || [];
+    return (
+      list.find((i) => i.invoiceNumber === invoiceNumber) ||
+      list.find(
+        (i) =>
+          i.customerName.toLowerCase() === customerName.toLowerCase() &&
+          i.status !== 'paid'
+      )
+    );
+  }, [invoiceNumber, customerName]);
+
+  const [includePaymentLink, setIncludePaymentLink] = useState<boolean>(true);
+  const [paymentLinkUrl, setPaymentLinkUrl] = useState<string | null>(
+    matchingInvoice?.paymentLinkUrl || null
+  );
+  const [isGeneratingLink, setIsGeneratingLink] = useState<boolean>(false);
+
+  // Auto-generate or retrieve payment link for this invoice
+  useEffect(() => {
+    if (matchingInvoice && !paymentLinkUrl && !isGeneratingLink) {
+      setIsGeneratingLink(true);
+      paymentLinkService.generatePaymentLink(matchingInvoice).then((res) => {
+        if (res.success && res.paymentUrl) {
+          setPaymentLinkUrl(res.paymentUrl);
+        }
+        setIsGeneratingLink(false);
+      });
+    }
+  }, [matchingInvoice?.id]);
+
   // Template vs Custom mode for WhatsApp
   const [useTemplate, setUseTemplate] = useState<boolean>(true);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState<WhatsAppTemplateKey>(
-    overdueDays > 0 ? 'overdue_payment' : 'payment_reminder'
+    'payment_link_reminder'
   );
 
   const [message, setMessage] = useState('');
@@ -166,6 +201,9 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
     const tmpl = APPROVED_WHATSAPP_TEMPLATES[key];
     if (!tmpl) return message;
     if (key === 'hello_world') return 'Hello World (Official Meta pre-approved connectivity test template)';
+    if (key === 'payment_link_reminder') {
+      return `Hello ${customerName}, invoice ${invoiceNumber} for ${currencySymbol}${amount.toLocaleString('en-IN')} is ready. Pay directly via UPI / Cards using this link: ${paymentLinkUrl || '(Generating Smart Link...)'}`;
+    }
     if (key === 'overdue_payment') {
       return `Hello ${customerName}, invoice ${invoiceNumber} for ${currencySymbol}${amount.toLocaleString('en-IN')} is overdue. Please contact us if you need assistance with payment.`;
     }
@@ -210,9 +248,13 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
             invoiceNumber,
             amount: `${currencySymbol}${amount.toLocaleString('en-IN')}`,
             dueDate,
+            paymentUrl: paymentLinkUrl || '',
           };
         } else {
-          payload.freeformText = message;
+          payload.freeformText =
+            includePaymentLink && paymentLinkUrl && !message.includes(paymentLinkUrl)
+              ? `${message}\n\n👉 Pay directly online (UPI / Cards / Net Banking): ${paymentLinkUrl}`
+              : message;
         }
 
         const result = await whatsappService.sendMessage(payload);
@@ -289,6 +331,11 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
         setShowGmailConfirm(true);
       } else {
         // Email (Resend) or SMS channel dispatch via backend endpoint
+        const finalMessage =
+          includePaymentLink && paymentLinkUrl && !message.includes(paymentLinkUrl)
+            ? `${message}\n\n👉 Pay directly online (UPI / Cards / Net Banking): ${paymentLinkUrl}`
+            : message;
+
         const response = await fetch('/api/notifications/dispatch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -298,7 +345,7 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
             recipientName: customerName,
             recipientTarget: channel === 'email' ? recipientEmail : phoneValidation.normalized || recipientPhone,
             subject: subject || `Payment Reminder: ${invoiceNumber}`,
-            content: message,
+            content: finalMessage,
             invoiceNumber,
             customerName,
           }),
@@ -362,10 +409,15 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
     setSendError(null);
 
     try {
+      const finalEmailBody =
+        includePaymentLink && paymentLinkUrl && !message.includes(paymentLinkUrl)
+          ? `${message}\n\n👉 Pay directly online (UPI / Cards / Net Banking): ${paymentLinkUrl}`
+          : message;
+
       const res = await gmailService.sendEmail({
         to: recipientEmail,
         subject: subject || `Payment Reminder: ${invoiceNumber}`,
-        body: message,
+        body: finalEmailBody,
         customerName,
         invoiceNumber,
       });
@@ -695,6 +747,35 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
               </div>
             )}
 
+            {/* Smart Payment Link Notification Integration Pill */}
+            <div className="p-3 bg-gradient-to-r from-indigo-50/80 to-purple-50/60 border border-indigo-100 rounded-2xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                    <LinkIcon size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                      <span>Smart Payment Link (UPI / Cards)</span>
+                      {isGeneratingLink && <Loader2 size={12} className="animate-spin text-indigo-600" />}
+                    </div>
+                    <div className="text-[11px] text-indigo-800/80 truncate max-w-xs sm:max-w-md">
+                      {paymentLinkUrl || 'Generating secure mobile payment link...'}
+                    </div>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer select-none shrink-0 ml-2">
+                  <span className="text-[11px] font-bold text-indigo-900 hidden sm:inline">Attach Link</span>
+                  <input
+                    type="checkbox"
+                    checked={includePaymentLink}
+                    onChange={(e) => setIncludePaymentLink(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                </label>
+              </div>
+            </div>
+
             {/* WhatsApp Template vs Custom message selection */}
             {channel === 'whatsapp' && (
               <div className="space-y-3 p-3.5 bg-emerald-50/50 border border-emerald-100 rounded-2xl">
@@ -737,6 +818,7 @@ export const SendReminderModal: React.FC<SendReminderModalProps> = ({
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {(
                         [
+                          'payment_link_reminder',
                           'payment_reminder',
                           'overdue_payment',
                           'promise_reminder',

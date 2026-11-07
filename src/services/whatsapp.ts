@@ -9,6 +9,7 @@ import { normalizeWhatsAppNumber } from '../utils/phone';
 export type WhatsAppTemplateKey =
   | 'invoice_created'
   | 'payment_reminder'
+  | 'payment_link_reminder'
   | 'overdue_payment'
   | 'payment_received'
   | 'promise_reminder'
@@ -29,6 +30,16 @@ export interface WhatsAppTemplateConfig {
  * Standard approved template definitions matching Meta WhatsApp Business guidelines.
  */
 export const APPROVED_WHATSAPP_TEMPLATES: Record<WhatsAppTemplateKey, WhatsAppTemplateConfig> = {
+  payment_link_reminder: {
+    key: 'payment_link_reminder',
+    displayName: 'Payment Link Reminder (Pay Now)',
+    metaTemplateName: 'collectiq_payment_link',
+    languageCode: 'en_US',
+    category: 'UTILITY',
+    description: 'Instant settlement alert containing direct smart payment link for UPI and Cards.',
+    bodyPreview: 'Hello {{1}}, invoice {{2}} for {{3}} is ready. Pay directly via UPI / Cards using this link: {{4}}',
+    parameters: ['customerName', 'invoiceNumber', 'amount', 'paymentUrl'],
+  },
   invoice_created: {
     key: 'invoice_created',
     displayName: 'Invoice Created',

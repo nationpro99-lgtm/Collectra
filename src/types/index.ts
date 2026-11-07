@@ -14,6 +14,7 @@ export interface BusinessProfile {
   businessName: string;
   ownerName: string;
   ownerEmail: string;
+  ownerUid?: string;
   phone: string;
   businessAddress: string;
   currency: string;
@@ -54,6 +55,35 @@ export interface Invoice {
   notes?: string;
   paymentTerms?: string;
   createdAt: string;
+  paymentLinkId?: string;
+  paymentLinkUrl?: string;
+  paymentLinkStatus?: 'active' | 'paid' | 'expired' | 'revoked';
+  allowPartialPayments?: boolean;
+  minPartialAmount?: number;
+}
+
+export interface SmartPaymentLink {
+  id: string;
+  token: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  businessId: string;
+  businessName: string;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  amount: number;
+  balance: number;
+  dueDate: string;
+  status: 'active' | 'paid' | 'expired' | 'revoked';
+  allowPartialPayments: boolean;
+  minPartialAmount?: number;
+  createdAt: string;
+  expiresAt: string;
+  paidAt?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
 }
 
 export interface Customer {
@@ -205,6 +235,11 @@ export interface BusinessSettings {
   twoFactorEnabled: boolean;
   currentPlan: 'Free Trial' | 'Starter' | 'Pro' | 'Enterprise';
   trialDaysLeft: number;
+  allowPartialPayments: boolean;
+  minPartialAmount: number;
+  razorpayKeyId?: string;
+  razorpayKeySecretConfigured?: boolean;
+  razorpayWebhookConfigured?: boolean;
 }
 
 export type NotificationChannel = 'email' | 'whatsapp' | 'sms' | 'push';

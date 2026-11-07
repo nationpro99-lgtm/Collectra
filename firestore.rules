@@ -164,6 +164,7 @@ service cloud.firestore {
       allow create: if isOwner(userId) && isValidUserProfile(incoming());
       allow update: if isOwner(userId) && isValidUserProfile(incoming()) &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'photoURL']);
+      allow delete: if isOwner(userId);
 
       // Private AI chat conversations for the user
       match /conversations/{conversationId} {
@@ -203,6 +204,7 @@ service cloud.firestore {
                        isValidBusiness(incoming()) &&
                        incoming().ownerUid == existing().ownerUid &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'phone', 'businessAddress', 'currency', 'currencySymbol', 'timezone', 'gstin']);
+      allow delete: if isSignedIn() && (existing().ownerUid == request.auth.uid || isBusinessAdmin(businessId));
 
       // Subcollections scoped to Business
       match /invoices/{invoiceId} {
@@ -263,6 +265,11 @@ service cloud.firestore {
         allow delete: if isValidId(paymentId) && isBusinessAdmin(businessId);
       }
 
+      match /paymentLinks/{linkId} {
+        allow list, get: if isBusinessMember(businessId);
+        allow create, update, delete: if isBusinessMember(businessId);
+      }
+
       match /tasks/{taskId} {
         allow list: if isBusinessMember(businessId);
         allow get, delete: if isValidId(taskId) && isBusinessMember(businessId);
@@ -280,19 +287,22 @@ service cloud.firestore {
         allow create: if isValidId(logId) && isBusinessMember(businessId) &&
                          incoming().businessId == businessId &&
                          isValidActivityLog(incoming());
-        allow update, delete: if false; // Append-only audit trail
+        allow update: if false;
+        allow delete: if isBusinessAdmin(businessId);
       }
 
       match /activities/{logId} {
         allow list: if isBusinessMember(businessId);
         allow get: if isValidId(logId) && isBusinessMember(businessId);
         allow create: if isValidId(logId) && isBusinessMember(businessId);
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isBusinessAdmin(businessId);
       }
 
       match /team/{memberId} {
         allow list, get: if isBusinessMember(businessId);
-        allow create, update, delete: if isBusinessAdmin(businessId);
+        allow create, update: if isBusinessAdmin(businessId);
+        allow delete: if isBusinessAdmin(businessId) || isOwner(memberId);
       }
     }
   }

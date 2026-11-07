@@ -14,9 +14,13 @@ import {
   CheckCircle2,
   Clock,
   ArrowUpDown,
+  Link as LinkIcon,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Invoice } from '../../types';
 import { AppState, storageService } from '../../services/storage';
+import { paymentLinkService } from '../../services/paymentLinkService';
 
 interface InvoicesPageProps {
   state: AppState;
@@ -40,6 +44,22 @@ export const InvoicesPage: React.FC<InvoicesPageProps> = ({
   const [sortBy, setSortBy] = useState<'dueDate' | 'amount' | 'invoiceNumber'>('dueDate');
   const [sortAsc, setSortAsc] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [copiedInvoiceId, setCopiedInvoiceId] = useState<string | null>(null);
+
+  const handleCopyPaymentLink = async (inv: Invoice) => {
+    let url = inv.paymentLinkUrl;
+    if (!url) {
+      const res = await paymentLinkService.generatePaymentLink(inv, state.settings);
+      if (res.success && res.paymentUrl) {
+        url = res.paymentUrl;
+      }
+    }
+    if (url) {
+      navigator.clipboard.writeText(url);
+      setCopiedInvoiceId(inv.id);
+      setTimeout(() => setCopiedInvoiceId(null), 2000);
+    }
+  };
 
   // Metrics
   const totalInvoices = state.invoices.length;
@@ -309,6 +329,17 @@ export const InvoicesPage: React.FC<InvoicesPageProps> = ({
 
                           {inv.status !== 'paid' && (
                             <>
+                              <button
+                                onClick={() => handleCopyPaymentLink(inv)}
+                                className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                                  copiedInvoiceId === inv.id
+                                    ? 'text-emerald-600 bg-emerald-50'
+                                    : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
+                                }`}
+                                title={copiedInvoiceId === inv.id ? 'Copied Payment Link!' : 'Copy Smart Payment Link'}
+                              >
+                                {copiedInvoiceId === inv.id ? <Check size={15} /> : <LinkIcon size={15} />}
+                              </button>
                               <button
                                 onClick={() => onSendReminder(inv)}
                                 className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer"

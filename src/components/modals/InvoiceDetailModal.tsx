@@ -1,7 +1,24 @@
-import React from 'react';
-import { X, Printer, Download, Send, CreditCard, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  X,
+  Printer,
+  Download,
+  Send,
+  CreditCard,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  Link as LinkIcon,
+  Copy,
+  Check,
+  ExternalLink,
+  Shield,
+  Loader2,
+  Trash2,
+} from 'lucide-react';
 import { Invoice, BusinessSettings } from '../../types';
 import { CollectIQLogo } from '../common/Graphics';
+import { paymentLinkService } from '../../services/paymentLinkService';
 
 interface InvoiceDetailModalProps {
   invoice: Invoice | null;
@@ -22,6 +39,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 }) => {
   if (!isOpen || !invoice) return null;
 
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+  const [activeUrl, setActiveUrl] = useState<string | null>(invoice.paymentLinkUrl || null);
+
   const currency = settings.currencySymbol || '₹';
 
   const handlePrint = () => {
@@ -29,8 +50,27 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   };
 
   const handleDownload = () => {
-    // Generate text/csv or trigger print to save as PDF
     window.print();
+  };
+
+  const handleGenerateLink = async () => {
+    setIsGenerating(true);
+    try {
+      const res = await paymentLinkService.generatePaymentLink(invoice, settings);
+      if (res.success && res.paymentUrl) {
+        setActiveUrl(res.paymentUrl);
+      }
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    const url = activeUrl || invoice.paymentLinkUrl;
+    if (!url) return;
+    navigator.clipboard.writeText(url);
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2000);
   };
 
   return (
@@ -97,6 +137,68 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Smart Payment Link Banner (print:hidden) */}
+        {invoice.status !== 'paid' && (
+          <div className="px-6 py-3.5 bg-indigo-50/70 border-b border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                <LinkIcon size={16} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-indigo-950">Smart Payment Link</span>
+                  {activeUrl ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      Active
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
+                      Not Generated
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-indigo-900/70 truncate max-w-xs sm:max-w-md">
+                  {activeUrl || 'Generate an instant UPI & Card payment URL for this invoice'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+              {activeUrl ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs font-semibold shadow-2xs transition-colors"
+                  >
+                    {copySuccess ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    <span>{copySuccess ? 'Copied!' : 'Copy Link'}</span>
+                  </button>
+                  <a
+                    href={activeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-xs font-semibold shadow-2xs transition-colors"
+                  >
+                    <ExternalLink size={14} />
+                    <span>Open Portal</span>
+                  </a>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isGenerating}
+                  onClick={handleGenerateLink}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-2xs transition-colors disabled:opacity-50"
+                >
+                  {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <LinkIcon size={14} />}
+                  <span>Generate Link</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Printable Invoice Sheet */}
         <div className="p-8 bg-white" id="printable-invoice">

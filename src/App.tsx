@@ -37,6 +37,7 @@ import { AnalyticsPage } from './components/pages/AnalyticsPage';
 import { TeamPage } from './components/pages/TeamPage';
 import { IntegrationsPage } from './components/pages/IntegrationsPage';
 import { SettingsPage } from './components/pages/SettingsPage';
+import { CustomerPaymentPage } from './components/pages/CustomerPaymentPage';
 
 function CollectIQMain() {
   const { isAuthenticated, isLoading, currentBusiness } = useAuth();
@@ -425,6 +426,29 @@ function CollectIQMain() {
 }
 
 export default function App() {
+  const [payToken, setPayToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const pathname = window.location.pathname;
+    const searchParams = new URLSearchParams(window.location.search);
+    if (pathname.startsWith('/pay/')) {
+      const seg = pathname.replace('/pay/', '').split('/')[0];
+      return seg ? seg : null;
+    }
+    return searchParams.get('pay');
+  });
+
+  if (payToken) {
+    return (
+      <CustomerPaymentPage
+        token={payToken}
+        onBackToApp={() => {
+          window.history.pushState({}, '', '/');
+          setPayToken(null);
+        }}
+      />
+    );
+  }
+
   return (
     <AuthProvider>
       <CollectIQMain />

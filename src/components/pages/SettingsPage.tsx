@@ -20,6 +20,7 @@ import { AppState, storageService } from '../../services/storage';
 import { NotificationSettingsView } from '../notifications/NotificationSettingsView';
 import { useAuth } from '../../context/AuthContext';
 import { chatService } from '../../services/chatService';
+import { DeleteAccountModal } from '../modals/DeleteAccountModal';
 
 interface SettingsPageProps {
   state: AppState;
@@ -51,6 +52,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
   const [accountNumber, setAccountNumber] = useState(state.settings.accountNumber);
   const [ifscCode, setIfscCode] = useState(state.settings.ifscCode);
   const [upiId, setUpiId] = useState(state.settings.upiId);
+  const [allowPartialPayments, setAllowPartialPayments] = useState(
+    state.settings.allowPartialPayments ?? true
+  );
+  const [minPartialAmount, setMinPartialAmount] = useState(
+    state.settings.minPartialAmount || 500
+  );
 
   // Notification states
   const [emailNotif, setEmailNotif] = useState(state.settings.emailNotifications);
@@ -64,6 +71,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
   const [showClearChatModal, setShowClearChatModal] = useState(false);
   const [isClearingChat, setIsClearingChat] = useState(false);
   const [chatNotice, setChatNotice] = useState<string | null>(null);
+
+  // Delete Account modal state
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
 
   const handleClearAllChatHistory = async () => {
     if (!currentUser?.uid) return;
@@ -103,6 +113,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
       accountNumber,
       ifscCode,
       upiId,
+      allowPartialPayments,
+      minPartialAmount: Number(minPartialAmount) || 500,
     });
     showSuccess();
   };
@@ -118,7 +130,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
 
   const showSuccess = () => {
     setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+    setTimeout(() => setSavedSuccess(false), 3000);
   };
 
   const handleResetData = () => {
@@ -142,7 +154,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-2xs">
         {[
           { id: 'general', label: 'General', icon: Building },
-          { id: 'profile', label: 'Profile', icon: User },
+          { id: 'profile', label: 'Account Settings', icon: User },
           { id: 'invoice', label: 'Invoice & Banking', icon: FileText },
           { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'billing', label: 'Plan & Billing', icon: CreditCard },
@@ -303,10 +315,35 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
           <div className="pt-4 border-t border-slate-100 flex justify-end">
             <button
               onClick={showSuccess}
-              className="px-5 py-2 rounded-xl bg-[#4f46e5] text-white text-xs font-bold shadow-xs cursor-pointer"
+              className="px-5 py-2 rounded-xl bg-[#4f46e5] hover:bg-[#4338ca] text-white text-xs font-bold shadow-xs cursor-pointer"
             >
               Update Profile
             </button>
+          </div>
+
+          {/* Account Settings & Danger Zone */}
+          <div className="pt-6 border-t border-rose-100">
+            <div className="p-4 rounded-2xl bg-rose-50/80 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full inline-block">
+                    Danger Zone
+                  </span>
+                  <h4 className="font-extrabold text-slate-900 text-sm">Delete Account</h4>
+                </div>
+                <p className="text-xs text-rose-800/80 mt-1">
+                  Permanently delete your account and associated business data. This action cannot be undone.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteAccountModal(true)}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-2 shadow-xs transition-colors shrink-0 cursor-pointer"
+              >
+                <Trash2 size={14} />
+                <span>Delete Account</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -384,12 +421,69 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
               </div>
             </div>
 
+            {/* Smart Payment Links & Partial Payments */}
+            <div className="p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-xs">Partial Payments for Payment Links</h4>
+                  <p className="text-[11px] text-slate-500">
+                    Allow debtors to settle invoices in installments or partial amounts directly via payment links
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={allowPartialPayments}
+                  onChange={(e) => setAllowPartialPayments(e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 rounded cursor-pointer"
+                />
+              </div>
+
+              {allowPartialPayments && (
+                <div className="pt-2 border-t border-indigo-100/80">
+                  <label className="block font-bold text-slate-700 text-[11px] mb-1">
+                    Minimum Partial Payment Amount ({state.settings.currencySymbol || '₹'})
+                  </label>
+                  <input
+                    type="number"
+                    min="100"
+                    step="50"
+                    value={minPartialAmount}
+                    onChange={(e) => setMinPartialAmount(Number(e.target.value))}
+                    className="w-full sm:w-64 px-3 py-1.5 rounded-xl bg-white border border-slate-200 font-bold text-slate-800 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Customers will not be allowed to submit partial payments below this threshold.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Razorpay Gateway Status Card */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <CreditCard size={15} className="text-indigo-600" />
+                  <span>Indian Payment Gateway (Razorpay)</span>
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                  Automated HMAC Verification & Webhooks
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                CollectIQ supports UPI Intent (Google Pay, PhonePe, Paytm, BHIM), RuPay/Visa/Mastercard Cards, and Net Banking with cryptographic signature verification and idempotent reconciliation.
+              </p>
+              <div className="p-2.5 bg-white rounded-xl border border-slate-200 font-mono text-[10px] text-slate-600 flex items-center justify-between">
+                <span>Webhook Endpoint: /api/payments/webhook</span>
+                <span className="text-emerald-600 font-bold">HMAC-SHA256 Active</span>
+              </div>
+            </div>
+
             <div className="pt-4 border-t border-slate-100 flex justify-end">
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-[#4f46e5] text-white font-bold shadow-xs cursor-pointer"
+                className="px-5 py-2 rounded-xl bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold shadow-xs cursor-pointer"
               >
-                Save Banking Settings
+                Save Payment & Banking Settings
               </button>
             </div>
           </form>
@@ -518,7 +612,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
           </div>
 
           <div className="pt-6 border-t border-slate-200">
-            <h4 className="font-bold text-slate-900 text-sm mb-1 text-rose-600 flex items-center gap-1.5">
+            <h4 className="font-bold text-slate-900 text-sm mb-1 text-slate-700 flex items-center gap-1.5">
               <RotateCcw size={16} />
               <span>Reset Application Ledger</span>
             </h4>
@@ -527,10 +621,35 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
             </p>
             <button
               onClick={handleResetData}
-              className="py-2 px-4 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-all cursor-pointer"
+              className="py-2 px-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-all cursor-pointer"
             >
               Reset to Reference Seed Data
             </button>
+          </div>
+
+          {/* Danger Zone: Permanent Account Deletion */}
+          <div className="pt-6 border-t border-rose-200">
+            <div className="p-4 rounded-2xl bg-rose-50/80 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full inline-block">
+                    Irreversible
+                  </span>
+                  <h4 className="font-extrabold text-slate-900 text-sm">Delete Account</h4>
+                </div>
+                <p className="text-xs text-rose-800/80 mt-1">
+                  Permanently delete your account and associated business data. This action cannot be undone.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteAccountModal(true)}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-2 shadow-xs transition-colors shrink-0 cursor-pointer"
+              >
+                <Trash2 size={14} />
+                <span>Delete Account</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -583,6 +702,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ state, onOpenUpgrade
           </div>
         </div>
       )}
+
+      {/* Delete Account Confirmation Modal */}
+      <DeleteAccountModal
+        isOpen={showDeleteAccountModal}
+        onClose={() => setShowDeleteAccountModal(false)}
+        onDeleted={() => {
+          window.location.href = '/';
+        }}
+      />
     </div>
   );
 };
